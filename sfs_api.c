@@ -60,7 +60,7 @@ typedef struct dir_entry{
   unsigned int rw_ptr; 
 } dir_entry_t;
 
-
+/////
 typedef struct super_block{ 
   unsigned int magic; 
   unsigned int block_size; 
