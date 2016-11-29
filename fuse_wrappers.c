@@ -12,7 +12,7 @@
 
 #define FUSE_USE_VERSION 30
 
-#include <fuse.h>
+// #include <fuse.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
