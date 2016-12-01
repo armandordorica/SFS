@@ -206,7 +206,7 @@ int write_blocks(int start_address, int nblocks, void *buffer)*/
 
 
 int sfs_get_next_file_name(char *fname){
-
+  printf("inside sfs_get_next_file_name function\n");
   int num_files = 0; 
   static int j = 0; 
 
@@ -256,9 +256,9 @@ int sfs_remove(char *file){
 int name_to_inode_number (char* name){
   int i, inode_idx; 
 
-  for(i = 0 <= <MAX_INODES; i++){
+  for(i = 0; i<MAX_INODES; i++){
     if(strcmp(root_dir[i].name, name) == 0){
-      inode_idx = root_dir.inode_idx; 
+    //  inode_idx = root_dir.inode_idx; 
       return inode_idx; 
     }
   }
