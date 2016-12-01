@@ -17,14 +17,16 @@
 
 #define NUM_BLOCKS 1024
 #define FS_SIZE BLOCK_SIZE*NUM_BLOCKS
-#define MAX_INODES 100
-#define MAX_FILES 12
+#define MAX_INODES 150
+#define MAX_FILES 16
+#define MAX_FILE_NAME_SIZE 30
 #define INODE_T_START_ADDRESS 2 
 #define ROOT_START_ADDRESS 24 
 #define INODE_MAP_START_ADDRESS 34
 #define BLOCK_MAP_START_ADDRESS 35
 #define INODE_NUM_BLOCKS (MAX_INODES*sizeof(inode_t)/BLOCK_SIZE) + 1
 #define ROOT_NUM_BLOCKS (MAX_INODES-1)*sizeof(dir_entry_t)/NUM_BLOCKS + 1
+#define ROOTFD 0
 
 
 /*USEFUL FUNCTIONS 
@@ -71,12 +73,12 @@ typedef struct Directory{
 
 typedef struct dir_entry{
   int status; 
-  // char name[MAXFILENAME]; 
+  char name[MAX_FILE_NAME_SIZE]; 
   unsigned int rw_ptr; 
 } dir_entry_t;
 
 
-typedef struct fd_table { 
+typedef struct fd_table_t { 
   char status;
   unsigned int inode_idx; 
   unsigned int rw_ptr; 
@@ -98,13 +100,15 @@ super_block_t sb;
 inode_t inode_table[MAX_INODES]; 
 dir_entry_t root_dir[MAX_INODES-1]; //Need to decrease 1 because the first
 //inode is in the directory
-
+void clear_fd_table(){ 
+  for(int i = 0; i< MAX_FILES; i++)
+      fd_table[i].status = FREE;
+}
 
 void mksfs(int fresh){
 
      /*Step 1. Format the virtual disk implemented by the disk emulator */ 
- for(int i = 0; i< MAX_FILES; i++)
-      fd_table[i].status = FREE;
+     clear_fd_table();
 
   if(fresh){
     /*Create the file system from scratch*/ 
@@ -166,24 +170,62 @@ int write_blocks(int start_address, int nblocks, void *buffer)*/
     write_blocks(INODE_MAP_START_ADDRESS, 1, inode_table);
 
     printf("Initializing free blocks\n"); //31st block
-    memset(free_blocks, FREE, block_size); 
+    memset(free_blocks, FREE, BLOCK_SIZE); 
+    write_blocks(BLOCK_MAP_START_ADDRESS, 1, free_blocks);
+
+    //Initializing file descriptor table
+    fd_table[ROOTFD].status = USED; 
+    fd_table[ROOTFD].inode_idx = ROOT_INODE_START_ADDRESS;
+    fd_table[ROOTFD].rw_ptr = 0; 
+  } else{
+    /*load from directory*/ 
+    clear_fd_table(); 
+    /*Initializes an existing disk*/
+    // int init_disk(char *filename, int block_size, int num_blocks)
+
+    init_disk(DISK_NAME, BLOCK_SIZE, NUM_BLOCKS);
+
+    /*reading blocks
+    Reads a series of blocks from the disk into the buffer
+    int read_blocks(int start_address, int nblocks, void *buffer)*/
+    read_blocks(INODE_MAP_START_ADDRESS, 1, (void*)free_inodes);
+    read_blocks(BLOCK_MAP_START_ADDRESS, 1, (void*)free_blocks);
+    read_blocks(ROOT_START_ADDRESS, ROOT_NUM_BLOCKS, (void*)root_dir);
+    read_blocks(INODE_T_START_ADDRESS, INODE_NUM_BLOCKS, (void*)inode_table);
 
 
+      //Initializing file descriptor table
+    fd_table[ROOTFD].status = USED; 
+    fd_table[ROOTFD].inode_idx = ROOT_INODE_START_ADDRESS;
+    fd_table[ROOTFD].rw_ptr = inode_table[fd_table[ROOTFD].inode_idx].size;
 
-
-
-
-
-
-
-
-
+    return;
 
   }
-
-
 }
+
+
 int sfs_get_next_file_name(char *fname){
+
+  int num_files = 0; 
+  static int j = 0; 
+
+  //Finding out how many files there are by looping through the inodes in the 
+  //loop directory that contain a USED flag 
+  for (int i = 0; i <= MAX_INODES; i++){
+    if(root_dir[j].status == USED){
+      num_files++; 
+    }
+  }
+
+  while(j<num_files){
+    //storing in the name in the root directory (directory entry struct)
+    strcpy(fname, root_dir[j].name); 
+    j++; 
+    return 1; 
+  }
+
+  j=0; 
   return 0;
 }
 int sfs_get_file_size(char* path){
@@ -209,6 +251,21 @@ int sfs_fread(int fileID, char *buf, int length){
 }
 int sfs_remove(char *file){
   return 0;
+}
+
+int name_to_inode_number (char* name){
+  int i, inode_idx; 
+
+  for(i = 0 <= <MAX_INODES; i++){
+    if(strcmp(root_dir[i].name, name) == 0){
+      inode_idx = root_dir.inode_idx; 
+      return inode_idx; 
+    }
+  }
+
+  return -1; 
+
+
 }
 
 // void create_superblock(){
