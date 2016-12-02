@@ -19,7 +19,7 @@
 #define FS_SIZE BLOCK_SIZE*NUM_BLOCKS
 #define MAX_INODES 150
 #define MAX_FILES 16
-#define MAX_FILE_NAME_SIZE 30
+#define MAX_FILE_NAME_SIZE BLOCK_SIZE*NUM_DIR_PTR
 #define INODE_T_START_ADDRESS 2 
 #define ROOT_START_ADDRESS 24 
 #define INODE_MAP_START_ADDRESS 34
@@ -266,7 +266,7 @@ int name_to_inode_number (char* name){
 
   for(i = 0; i<= MAX_INODES; i++){
     if(strcmp(root_dir[i].name, name) == 0){
-    inode_idx = root_dir.inode_idx; 
+    inode_idx = root_dir[i].inode_idx; 
       return inode_idx; 
     }
   }
