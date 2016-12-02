@@ -74,7 +74,7 @@ typedef struct Directory{
 typedef struct dir_entry{
   int status; 
   char name[MAX_FILE_NAME_SIZE]; 
-  unsigned int rw_ptr; 
+  unsigned int inode_idx; 
 } dir_entry_t;
 
 
