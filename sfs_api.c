@@ -117,11 +117,19 @@ void mksfs(int fresh){
     /*int init_fresh_disk(char *filename, int block_size, int num_blocks)*/
     init_fresh_disk(DISK_NAME, BLOCK_SIZE, NUM_BLOCKS);
     //fill everything with zeros 
+    printf("size of super_block_t is: %d\n", sizeof(super_block_t));
+
     bzero(&sb, sizeof(super_block_t));
+
+    printf("size of inode_t is: %d\n", sizeof(inode_t));
     bzero(&inode_table[0], sizeof(inode_t)*MAX_INODES);
+
+    printf("sizeof(dir_entry_t) is: %d\n",  sizeof(dir_entry_t));
     bzero(&root_dir[0], sizeof(dir_entry_t)*(MAX_INODES-1)); 
     bzero(&free_blocks[0], BLOCK_SIZE);
     bzero(&free_inodes[0], BLOCK_SIZE); 
+
+    printf("sizeof(fd_table_t) is: %d\n",  sizeof(fd_table_t));
     bzero(&fd_table[0], sizeof(fd_table_t)*MAX_FILES);
 
     
@@ -256,9 +264,9 @@ int sfs_remove(char *file){
 int name_to_inode_number (char* name){
   int i, inode_idx; 
 
-  for(i = 0; i<MAX_INODES; i++){
+  for(i = 0; i<= MAX_INODES; i++){
     if(strcmp(root_dir[i].name, name) == 0){
-    //  inode_idx = root_dir.inode_idx; 
+    inode_idx = root_dir.inode_idx; 
       return inode_idx; 
     }
   }
