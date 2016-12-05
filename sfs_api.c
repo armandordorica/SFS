@@ -1,11 +1,17 @@
-#include "sfs_api.h"
+
 #include "disk_emu.h"
 #include <string.h> 
 #include <unistd.h>
 #include <stdio.h> 
+#include "sfs_api.h"
 
 #define BLOCK_SIZE 1024
 #define MAGIC_NUMBER 0xACBD0005
+/*The header starts with a so-called magic number,
+ identifying the file as an executable file (to prevent the accidental execution 
+ of a file not in this format)*/
+/*Then come the sizes of the various pieces of the file, the address at which execution starts,
+ and some flag bits. */
 #define NUM_DIR_PTR 12
 
 #define DISK_NAME "Armando_Ordorica_SFS"
@@ -27,6 +33,8 @@
 #define INODE_NUM_BLOCKS (MAX_INODES*sizeof(inode_t)/BLOCK_SIZE) + 1
 #define ROOT_NUM_BLOCKS (MAX_INODES-1)*sizeof(dir_entry_t)/NUM_BLOCKS + 1
 #define ROOTFD 0
+#define IND_PTR_SIZE 4
+
 
 
 /*USEFUL FUNCTIONS 
@@ -34,14 +42,16 @@ Writes a series of blocks to the disk from the buffer
 int write_blocks(int start_address, int num, void *buffer)
 */
 
-typedef struct block_ptr {
+typedef struct block_ptr_t {
   /*array containing the direct pointers*/ 
   int direct_ptr[NUM_DIR_PTR]; 
   /*index containing the indirect pointer*/ 
   int indirect_ptr; 
 } block_ptr_t; 
 
-
+/*Each inode entry contains the file attributes, except the name. 
+The first I-node points to the block containing the root directory of the file system. 
+*/
 typedef struct inode{ 
   /*The file mode which determines the file type and how the file's owner, its group, and others can access the file.*/
   unsigned int mode; //change this to var name permissions 
@@ -87,6 +97,9 @@ typedef struct fd_table_t {
 /////
 
 fd_table_t fd_table[MAX_FILES];
+
+/*The super block contains critical information about the layout 
+of the file system, such as the number of inodes and the number of disk blocks. */
 typedef struct super_block{ 
   unsigned int magic; 
   unsigned int block_size; 
@@ -94,6 +107,8 @@ typedef struct super_block{
   unsigned int inode_table_len; 
   unsigned int root_dir_inode; 
 } super_block_t; 
+
+int get_block_ptr (block_ptr_t* block_pointers, int block_num);
 
 char free_blocks[BLOCK_SIZE];
 char free_inodes[BLOCK_SIZE];
@@ -333,6 +348,14 @@ int sfs_fopen(char *name){
   return 0;
 }
 int sfs_fclose(int fileID){
+    if(fd_table[fileID].status == FREE){
+      return -1; 
+    }
+
+    /*Change the status of the entry in the fd_table with the fileID passed as argument to FREE*/ 
+    fd_table[fileID].status = FREE; 
+    fd_table[fileID].inode_idx = -1; //EOF 
+
   return 0;
 }
 int sfs_frseek(int fileID, int loc){
@@ -342,6 +365,44 @@ int sfs_fwseek(int fileID, int loc){
   return 0;
 }
 int sfs_fwrite(int fileID, char *buf, int length){
+
+  inode_t* inode; 
+  char block[BLOCK_SIZE]; 
+  int offset, w_ptr, block_num, block_ptr, bytes_last_block, last_full_block;
+  /*Check in open file table for fileID. If you find it, continue. Else, return -1.
+    Check if (offset+ length) is smaller than the block size. This means that it fits, so no need for 
+    other blocks. 
+    call the read block function and pass it the block index. 
+    use mem_cpy to copy from the buffer as your source to the block buffer as your destination and include 
+    how many bytes will be copied. 
+    mem_cpy has to account for index within the data block, so that you don't write to the wrong address. 
+    update the write pointer with the length of the caracter you just wrote. 
+    Update the buffer index by subtracting from the block size, the block offset you added. 
+    Let n be the number of full blocks between the current and last block.
+    for i=0 to n,
+      current_block = first_block_index + 1; 
+      write_to_block(block_index+1, buff + buff_index); 
+      buff_index += 1024; 
+  */
+
+      if ((fd_table[fileID].status == FREE) || (fd_table[fileID].w_ptr + length > MAX_FILES)){
+        printf("Cannot write to this file \n"); 
+        return -1; 
+      }
+
+      inode = &inode_table[fd_table[fileID].inode_idx]; 
+      w_ptr = fd_table[fileID].w_ptr;
+      block_num = w_ptr / BLOCK_SIZE;
+      offset = w_ptr % BLOCK_SIZE; 
+
+      if ((offset + length) <= BLOCK_SIZE){
+        /*The data fits in the current block, no need to go for the next one*/
+        block_ptr = get_block_ptr(&(inode->block_ptr), block_num); 
+      }
+
+
+
+
   return 0;
 }
 int sfs_fread(int fileID, char *buf, int length){
@@ -433,6 +494,49 @@ int get_free_fd()
     
     return -1;
 }
+
+int get_block_ptr (block_ptr_t* block_pointers, int block_num){
+
+  int ind_ptr_array[BLOCK_SIZE/IND_PTR_SIZE];
+  /*Getting a direct pointer */
+  if (block_num < NUM_DIR_PTR){
+    if(block_pointers->direct_ptr[block_num] == 0){
+      if ((block_pointers -> direct_ptr[block_num] = get_free_block_id()) == 0)
+        return -1; 
+    } else {
+      return block_pointers->direct_ptr[block_num];
+    }
+  }
+
+  if(block_pointers->indirect_ptr == 0){
+    if((block_pointers->indirect_ptr = get_free_datablock()) == 0){
+      printf("Indirect pointer has not been initialized\n"); 
+    }
+
+    memset(ind_ptr_array, 0, BLOCK_SIZE); 
+    write_blocks(block_pointers->indirect_ptr, 1, (void*)ind_ptr_array);
+  }
+
+
+  return ind_ptr_array[block_num - NUM_DIR_PTR]; 
+}
+
+int get_free_block_idx()
+{
+
+  int i; 
+  for (i=0; i<NUM_BLOCKS; i++){
+    if(free_blocks[i] == FREE){
+      /*If free take it, and change its status*/
+      free_blocks[i] = USED; 
+      write_blocks(BLOCK_MAP_START_ADDRESS, 1, free_blocks);
+      return BLOCK_MAP_START_ADDRESS + i + 1; 
+    }
+  }
+  printf("No more free data blocks available.\n");
+}
+
+
 // void create_superblock(){
 //   unsigned int *buff = malloc(BLOCK_SIZE);
 
