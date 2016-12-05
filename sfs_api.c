@@ -116,6 +116,8 @@ typedef struct super_block{
 
 int max(int A, int B);
 int get_block_ptr (block_ptr_t* block_pointers, int block_num);
+void free_pointers_block(block_ptr_t* pointers);
+void rem_file_from_dir (char* filename);
 
 char free_blocks[BLOCK_SIZE];
 char free_inodes[BLOCK_SIZE];
@@ -484,10 +486,48 @@ int sfs_fwrite(int fileID, char *buf, int length){
 
   return length;
 }
+
+
 int sfs_fread(int fileID, char *buf, int length){
+ /*Same variable declaration as fwrite*/ 
+  inode_t* inode; 
+  char block[BLOCK_SIZE]; 
+  int offset, w_ptr, block_num, block_ptr, bytes_last_block, last_full_block;
+
+  /*If file is not open yet*/
+  if(fd_table[fileID].status == FREE){
+    return -1; 
+  }
+
+  /*Retrieve corresponding inode from fd table*/
+  inode = &inode_table[fd_table[fileID].inode_idx];
+
   return 0;
 }
+
+
+
 int sfs_remove(char *file){
+  int inode_number; 
+  inode_number = name_to_inode_number(file); 
+
+  if(inode_number == -1){
+    printf("It is not possible to remove this file\n"); 
+    return -1; 
+  }
+
+  free_pointers_block(&(inode_table[inode_number].block_ptr));
+
+  /*Free inode*/
+  free_inodes[inode_number] = FREE; 
+  write_blocks(INODE_MAP_START_ADDRESS, 1, free_inodes); 
+
+  rem_file_from_dir(file); 
+
+  /*Clearing the inode table*/
+  memset(&inode_table[inode_number], 0, sizeof(inode_t)); 
+  write_blocks(INODE_T_START_ADDRESS, INODE_NUM_BLOCKS, inode_table); 
+
   return 0;
 }
 
@@ -618,6 +658,84 @@ int get_block_ptr (block_ptr_t* block_pointers, int block_num){
   return ind_ptr_array[block_num - NUM_DIR_PTR]; 
 }
 
+void rem_file_from_dir (char* filename){
+
+  
+  int directory_size = inode_table[fd_table[ROOTFD].inode_idx].size;
+
+  int i;
+  for(i = 0; i<= MAX_INODES; i++){
+    if(strcmp(root_dir[i].name, filename) == 0){
+
+      //iterate until the file is found, then shift array  
+      /*#include <string.h>
+
+       void *memmove(void *dest, const void *src, size_t n);
+      The  memmove()  function  copies n bytes from memory area src to memory
+       area dest.  The memory areas may overlap: copying takes place as though
+       the  bytes in src are first copied into a temporary array that does not
+       overlap src or dest, and the bytes are then copied from  the  temporary
+       array to dest.
+      */
+
+       memmove(&root_dir[i], &root_dir[i+1], sizeof(dir_entry_t)*(MAX_INODES-i-INODE_T_START_ADDRESS));
+
+       dir_entry_t temp; 
+       temp.status = FREE; 
+       memcpy(&root_dir[MAX_INODES-INODE_T_START_ADDRESS], &temp, sizeof(dir_entry_t));
+
+       //Take the shift it cache and write it to memory
+       write_blocks(ROOT_START_ADDRESS, ROOT_NUM_BLOCKS, root_dir);
+
+      /*reseting file descript table pointers*/
+       fd_table[ROOTFD].w_ptr = 0; 
+       fd_table[ROOTFD].r_ptr = 0; 
+
+       inode_table[fd_table[ROOTFD].inode_idx].size = 0;
+
+       /*Removing old blocks*/
+       free_pointers_block(&inode_table[fd_table[ROOTFD].inode_idx].block_ptr);
+
+       memset(&inode_table[fd_table[ROOTFD].inode_idx], 0, sizeof(inode_t));
+       sfs_fwrite(ROOTFD, (char*)root_dir, directory_size- sizeof(dir_entry_t));
+
+       /*Updating inode table after file has been removed*/ 
+       write_blocks(INODE_T_START_ADDRESS, INODE_NUM_BLOCKS, inode_table);
+       return; 
+    }
+
+  }
+}
+
+void free_pointers_block(block_ptr_t* pointers){
+  int indirect_pointers[BLOCK_SIZE/IND_PTR_SIZE]; 
+  int index, block_num; 
+
+  for(block_num = 0; block_num <NUM_DIR_PTR; block_num++){
+    index = pointers->direct_ptr[block_num]; 
+    if(index == 0){
+      write_blocks(BLOCK_MAP_START_ADDRESS, 1, free_blocks);
+      return;  
+    }
+
+    index -= BLOCK_MAP_START_ADDRESS -1; 
+    free_blocks[index] = FREE; 
+  }
+
+  read_blocks(pointers->indirect_ptr, 1, (void*)indirect_pointers); 
+  for (block_num = 0; block_num < (BLOCK_SIZE/IND_PTR_SIZE); block_num++){
+    index = indirect_pointers[block_num]; 
+    if(index == 0){
+      write_blocks(BLOCK_MAP_START_ADDRESS, 1, free_blocks); 
+      return; 
+    }
+    index -= BLOCK_MAP_START_ADDRESS - 1; 
+    free_blocks[index] = FREE; 
+
+  }
+
+
+}
 int get_free_block_idx()
 {
 
