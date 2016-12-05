@@ -30,17 +30,6 @@
 #define ROOT_START_ADDRESS 24 
 #define INODE_MAP_START_ADDRESS 34
 #define BLOCK_MAP_START_ADDRESS 35
-#define INODE_NUM_BLOCKS (MAX_INODES*sizeof(inode_t)/BLOCK_SIZE) + 1
-#define ROOT_NUM_BLOCKS (MAX_INODES-1)*sizeof(dir_entry_t)/NUM_BLOCKS + 1
-#define ROOTFD 0
-#define IND_PTR_SIZE 4
-
-
-
-/*USEFUL FUNCTIONS 
-Writes a series of blocks to the disk from the buffer  
-int write_blocks(int start_address, int num, void *buffer)
-*/
 
 typedef struct block_ptr_t {
   /*array containing the direct pointers*/ 
@@ -49,10 +38,7 @@ typedef struct block_ptr_t {
   int indirect_ptr; 
 } block_ptr_t; 
 
-/*Each inode entry contains the file attributes, except the name. 
-The first I-node points to the block containing the root directory of the file system. 
-*/
-typedef struct inode{ 
+typedef struct inode_t{ 
   /*The file mode which determines the file type and how the file's owner, its group, and others can access the file.*/
   unsigned int mode; //change this to var name permissions 
   /*A link count telling how many hard links point to the inode.*/ 
@@ -74,6 +60,26 @@ typedef struct inode{
   block_ptr_t block_ptr; 
 
 } inode_t; 
+
+#define SIZE_OF_INODE_STRUCT  sizeof(inode_t)
+#define INODE_NUM_BLOCKS MAX_INODES*SIZE_OF_INODE_STRUCT/BLOCK_SIZE + 1
+#define ROOT_NUM_BLOCKS (MAX_INODES-1)*sizeof(dir_entry_t)/NUM_BLOCKS + 1
+#define ROOTFD 0
+#define IND_PTR_SIZE 4
+
+
+
+/*USEFUL FUNCTIONS 
+Writes a series of blocks to the disk from the buffer  
+int write_blocks(int start_address, int num, void *buffer)
+*/
+
+
+
+/*Each inode entry contains the file attributes, except the name. 
+The first I-node points to the block containing the root directory of the file system. 
+*/
+
 
 
 
@@ -108,6 +114,7 @@ typedef struct super_block{
   unsigned int root_dir_inode; 
 } super_block_t; 
 
+int max(int A, int B);
 int get_block_ptr (block_ptr_t* block_pointers, int block_num);
 
 char free_blocks[BLOCK_SIZE];
@@ -321,9 +328,7 @@ int sfs_fopen(char *name){
         write_blocks(ROOT_START_ADDRESS, ROOT_NUM_BLOCKS, root_dir);
         fd_table[ROOTFD].r_ptr = inode_table[fd_table[ROOTFD].inode_idx].size;
         fd_table[ROOTFD].w_ptr = inode_table[fd_table[ROOTFD].inode_idx].size;
-
         sfs_fwrite(ROOTFD, (char*)&new_file, sizeof(dir_entry_t));
-
 
 
        }else {
@@ -359,9 +364,25 @@ int sfs_fclose(int fileID){
   return 0;
 }
 int sfs_frseek(int fileID, int loc){
+  if(fd_table[fileID].status == FREE){
+    return -1; 
+  }
+  if (loc > inode_table[fd_table[fileID].inode_idx].size){
+    loc = inode_table[fd_table[fileID].inode_idx].size;
+  }
+
+  fd_table[fileID].r_ptr = loc; 
   return 0;
 }
 int sfs_fwseek(int fileID, int loc){
+  if(fd_table[fileID].status == FREE){
+    return -1; 
+  }
+  if (loc > inode_table[fd_table[fileID].inode_idx].size){
+    loc = inode_table[fd_table[fileID].inode_idx].size;
+  }
+
+  fd_table[fileID].w_ptr = loc; 
   return 0;
 }
 int sfs_fwrite(int fileID, char *buf, int length){
@@ -395,15 +416,73 @@ int sfs_fwrite(int fileID, char *buf, int length){
       block_num = w_ptr / BLOCK_SIZE;
       offset = w_ptr % BLOCK_SIZE; 
 
+      block_ptr = get_block_ptr(&(inode->block_ptr), block_num); 
+
       if ((offset + length) <= BLOCK_SIZE){
         /*The data fits in the current block, no need to go for the next one*/
-        block_ptr = get_block_ptr(&(inode->block_ptr), block_num); 
+        
+
+        /*If no blocks were available, return an error*/
+        if(block_ptr == -1){ 
+          printf("No blocks available\n"); 
+          return -1; 
+        }else{
+          /*Else, write on the part of the current block that is free*/
+          read_blocks(block_ptr, 1, block); 
+          memcpy(&block[offset], buf, length); 
+          write_blocks(block_ptr, 1, block);
+
+          /*Update the size of the file*/
+          inode->size = max(w_ptr + length, inode->size);
+          fd_table[fileID].w_ptr = w_ptr +length; 
+
+          write_blocks(INODE_T_START_ADDRESS, INODE_NUM_BLOCKS, inode_table); 
+          return length; 
+        }
+
+        
       }
+        bytes_last_block = (offset + length) %BLOCK_SIZE;
+        last_full_block = ((offset +  length)/BLOCK_SIZE) + block_num;
+
+        read_blocks(block_ptr, 1, block); 
+        memcpy(buf, &block[offset], BLOCK_SIZE - offset);
+        write_blocks(block_ptr, 1, block);
+
+        buf += BLOCK_SIZE - offset; 
+        block_num++;
+
+        while(block_num<last_full_block){
+            block_ptr = get_block_ptr(&(inode->block_ptr), block_num);
+            if (block_ptr == -1){
+              printf("Not able to retrieve block pointer. Error. \n");
+            }
+            memcpy(block, buf, bytes_last_block); 
+            write_blocks(INODE_T_START_ADDRESS, INODE_NUM_BLOCKS, inode_table);       
+            
+            buf += BLOCK_SIZE; 
+            block_num++; 
+        }
+
+        /*Writing last partial block*/
+        block_ptr = get_block_ptr(&(inode->block_ptr), block_num); 
+        if(block_ptr == -1){ 
+          return -1;
+        }
+        read_blocks(block_ptr, 1, block); 
+        memcpy(block, buf, bytes_last_block);
+        write_blocks(block_ptr, 1, block); 
+
+        /*Updating file size, write pointer, and inode table with new block pointers*/
+        inode->size = max(w_ptr + length, inode->size); 
+        fd_table[fileID].w_ptr = w_ptr + length; 
+        /*Update inode table with new block pointers*/
+        write_blocks(INODE_T_START_ADDRESS, INODE_NUM_BLOCKS, inode_table);
 
 
 
 
-  return 0;
+  return length;
 }
 int sfs_fread(int fileID, char *buf, int length){
   return 0;
@@ -457,6 +536,15 @@ char* getFileExtension (char* testString){
 
 }
 
+int max(int A, int B){
+  if(A>B){
+    return A;
+  }
+  if(B>A){
+    return B;
+  }
+  return 0; 
+}
 int get_free_inode_idx()
 {
     int i;
@@ -501,7 +589,7 @@ int get_block_ptr (block_ptr_t* block_pointers, int block_num){
   /*Getting a direct pointer */
   if (block_num < NUM_DIR_PTR){
     if(block_pointers->direct_ptr[block_num] == 0){
-      if ((block_pointers -> direct_ptr[block_num] = get_free_block_id()) == 0)
+      if ((get_free_block_idx()) == 0)
         return -1; 
     } else {
       return block_pointers->direct_ptr[block_num];
@@ -509,11 +597,20 @@ int get_block_ptr (block_ptr_t* block_pointers, int block_num){
   }
 
   if(block_pointers->indirect_ptr == 0){
-    if((block_pointers->indirect_ptr = get_free_datablock()) == 0){
+    if(get_free_block_idx() == 0){
       printf("Indirect pointer has not been initialized\n"); 
+      return -1; 
     }
 
     memset(ind_ptr_array, 0, BLOCK_SIZE); 
+    write_blocks(block_pointers->indirect_ptr, 1, (void*)ind_ptr_array);
+  }
+
+  read_blocks(block_pointers->indirect_ptr, 1, (void*)ind_ptr_array);
+  if(ind_ptr_array[block_num - NUM_DIR_PTR] == 0){
+    if( get_free_block_idx()==0){
+        return -1; 
+    }
     write_blocks(block_pointers->indirect_ptr, 1, (void*)ind_ptr_array);
   }
 
@@ -534,6 +631,7 @@ int get_free_block_idx()
     }
   }
   printf("No more free data blocks available.\n");
+  return 0; 
 }
 
 
