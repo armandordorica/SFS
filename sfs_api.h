@@ -12,6 +12,12 @@ int sfs_fwrite(int fileID, char *buf, int length); //good
 int sfs_fread(int fileID, char *buf, int length); //good 
 int sfs_remove(char *file); //good 
 
+int name_to_inode_number (char* name);
+char* getFileExtension (char* testString); 
+int get_free_fd();
+int get_free_inode_idx();
+int get_free_root_slot();
+
 
 
 /*Need to add 
